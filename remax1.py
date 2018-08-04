@@ -11,7 +11,7 @@ import sys
 
 # Booj's test data URL.
 XMLURL = 'http://syndication.enterprise.websiteidx.com/feeds/BoojCodeTest.xml'
-XMLFILE = 'blah.xml'
+XMLFILE = 'remax.xml'
 
 # Required Fields.
 # Root node:
@@ -43,8 +43,12 @@ DESCRIPTION = 'Description'
 # Header for Appliances.
 RICHDETAILS = 'RichDetails'
 # Subfields.
-APPLIANCES = 'Appliances'
 ROOMS = 'Rooms'
+# Sub-sub field.
+ROOMX = 'Room'
+APPLIANCES = 'Appliances'
+# Sub-sub field.
+APPLIANCEX = 'Appliance'
 
 # Assignment
 # 
@@ -89,83 +93,128 @@ ROOMS = 'Rooms'
 # 
 # This assignment is expect to take a few hours. We ask that you do not spend too much time on this solution. If you are stuck or have questions, feel free to reach out and we will answer quickly.
 
-# Simple way to pull data:
-#
-# https://stackoverflow.com/questions/22676/how-do-i-download-a-file-over-http-using-python
-print 'Connecting to page via urllib . . .'
-response = urllib2.urlopen('http://syndication.enterprise.websiteidx.com/feeds/BoojCodeTest.xml')
-print 'Getting xml . . .'
-html = response.read()
-print 'Writing data from web to xml file locally . . .'
-with open('blah.xml', 'w') as f:
-    print 'Writing xml to file . . .'
-    print >> f, html
-    f.close()
+def getdatafromweb():
+    """
+    Grab data from website.
 
-root = ElementTree.fromstring(html)
-# Get feel for data structure / schema in XML.
-with open('output', 'w') as f2:
-    print >> f2, root.tag
-    for n in xrange(len(root)):
-        print >> f2, '    ' + root[n].tag
-        for o in xrange(len(root[n])):
-            print >> f2, '        ' + root[n][o].tag
-            for p in xrange(len(root[n][o])):
-                print >> f2, '            ' + root[n][o][p].tag
+    Returns text.
+    """
+    print 'Connecting to page via urllib2 . . .'
+    response = urllib2.urlopen(XMLURL)
+    print 'Getting xml . . .'
+    return response.read()
 
-numlistings = 0
-numvalidlst = 0
-listings = {}
-# Check that Listings is top node.
-if root.tag == LISTINGS:
-    for n in xrange(len(root)):
-        # Inidivdual listing.
-        requireddata = {}
-        if root[n].tag == LISTINGX:
-            numlistings += 1
+def writexmltofile(text):
+    """
+    Writes xml text to a file.
+    """
+    print 'Writing data from web to xml file locally . . .'
+    with open(XMLFILE, 'w') as f:
+        print 'Writing xml to file . . .'
+        print >> f, text
+        f.close()
+
+def writeoutxmlstructure(root):
+    """
+    Write out data indented in a way
+    that is easier to visualize than
+    XML tagged data.
+
+    root is an ElementTree object.
+    """
+    # Get feel for data structure / schema in XML.
+    with open('xmlstructure.txt', 'w') as f2:
+        print >> f2, root.tag
+        for n in xrange(len(root)):
+            print >> f2, '    ' + root[n].tag
             for o in xrange(len(root[n])):
-                # Listing Details.
-                if root[n][o].tag == LISTINGDETAILS:
-                    for p in xrange(len(root[n][o])):
-                        # MLSId.
-                        if root[n][o][p].tag == MLSID:
-                            requireddata[MLSID] = root[n][o][p].text
-                        # MLSName.
-                        elif root[n][o][p].tag == MLSNAME:
-                            requireddata[MLSNAME] = root[n][o][p].text
-                        # DateListed.
-                        elif root[n][o][p].tag == DATELISTED:
-                            requireddata[DATELISTED] = root[n][o][p].text
-                        # Price.
-                        elif root[n][o][p].tag == PRICE:
-                            requireddata[PRICE] = root[n][o][p].text
-                elif root[n][o].tag == LOCATION:
-                    for p in xrange(len(root[n][o])):
-                        # StreetAddress.
-                        if root[n][o][p].tag == STREETADDR:
-                            requireddata[STREETADDR] = root[n][o][p].text
-                elif root[n][o].tag == BASICDETAILS:
-                    for p in xrange(len(root[n][o])):
-                        # Bedrooms.
-                        if root[n][o][p].tag == BEDROOMS:
-                            requireddata[BEDROOMS] = root[n][o][p].text
-                        # Bathrooms.
-                        elif root[n][o][p].tag == BATHROOMS:
-                            requireddata[BATHROOMS] = root[n][o][p].text
-                        # Description.
-                        elif root[n][o][p].tag == DESCRIPTION:
-                            requireddata[DESCRIPTION] = root[n][o][p].text
-                elif root[n][o].tag == RICHDETAILS:
-                    for p in xrange(len(root[n][o])):
-                        # Appliances.
-                        if root[n][o][p].tag == APPLIANCES:
-                            requireddata[APPLIANCES] = root[n][o][p].text
-                        elif root[n][o][p].tag == ROOMS:
-                            requireddata[ROOMS] = root[n][o][p].text
-            # XXX - debug.
-            listings[requireddata[MLSID]] = requireddata 
+                print >> f2, '        ' + root[n][o].tag
+                for p in xrange(len(root[n][o])):
+                    print >> f2, '            ' + root[n][o][p].tag
+                    # Get appliances.
+                    for q in xrange(len(root[n][o][p])):
+                        print >> f2, '                ' + root[n][o][p][q].tag
 
-with open('test.py', 'w') as f3:
+def putessentialdataintodictionary(root):
+    """
+    Gets essential data for the assignment
+    into a dictionary keyed on MLSId.
+
+    root is an ElementTree object.
+
+    Returns a dictionary.
+    """
+    numlistings = 0
+    listings = {}
+    # Check that Listings is top node.
+    if root.tag == LISTINGS:
+        for n in xrange(len(root)):
+            # Inidivdual listing.
+            requireddata = {}
+            if root[n].tag == LISTINGX:
+                numlistings += 1
+                for o in xrange(len(root[n])):
+                    # Listing Details.
+                    if root[n][o].tag == LISTINGDETAILS:
+                        for p in xrange(len(root[n][o])):
+                            # MLSId.
+                            if root[n][o][p].tag == MLSID:
+                                requireddata[MLSID] = root[n][o][p].text
+                            # MLSName.
+                            elif root[n][o][p].tag == MLSNAME:
+                                requireddata[MLSNAME] = root[n][o][p].text
+                            # DateListed.
+                            elif root[n][o][p].tag == DATELISTED:
+                                requireddata[DATELISTED] = root[n][o][p].text
+                            # Price.
+                            elif root[n][o][p].tag == PRICE:
+                                requireddata[PRICE] = root[n][o][p].text
+                    elif root[n][o].tag == LOCATION:
+                        for p in xrange(len(root[n][o])):
+                            # StreetAddress.
+                            if root[n][o][p].tag == STREETADDR:
+                                requireddata[STREETADDR] = root[n][o][p].text
+                    elif root[n][o].tag == BASICDETAILS:
+                        for p in xrange(len(root[n][o])):
+                            # Bedrooms.
+                            if root[n][o][p].tag == BEDROOMS:
+                                requireddata[BEDROOMS] = root[n][o][p].text
+                            # Bathrooms.
+                            elif root[n][o][p].tag == BATHROOMS:
+                                requireddata[BATHROOMS] = root[n][o][p].text
+                            # Description.
+                            elif root[n][o][p].tag == DESCRIPTION:
+                                requireddata[DESCRIPTION] = root[n][o][p].text
+                    elif root[n][o].tag == RICHDETAILS:
+                        for p in xrange(len(root[n][o])):
+                            # Appliances.
+                            if root[n][o][p].tag == APPLIANCES:
+                                quotedtexttojoin = []
+                                for q in xrange(len(root[n][o][p])):
+                                    quotedtexttojoin.append(root[n][o][p][q].text)
+                                requireddata[APPLIANCES] = quotedtexttojoin
+                            # The room thing seems to always be two - 
+                            # bedrooms / bathroom.
+                            elif root[n][o][p].tag == ROOMS:
+                                quotedtexttojoin = []
+                                for q in xrange(len(root[n][o][p])):
+                                    quotedtexttojoin.append(root[n][o][p][q].text)
+                                requireddata[ROOMS] = quotedtexttojoin
+                # Get date listed and mlsid in tuple as key.
+                listings[(requireddata[DATELISTED], requireddata[MLSID])] = requireddata 
+    return listings
+
+text = getdatafromweb()
+# Not essential but helpful for debugging.
+writexmltofile(text)
+# Not part of required solution, but key
+# key to getting solution set up and useful
+# for debugging.
+root = ElementTree.fromstring(text)
+writeoutxmlstructure(root)
+listings = putessentialdataintodictionary(root)
+
+with open('listingsdictionary.py', 'w') as f3:
     pprint.pprint(listings, stream=f3)
 
 # General strategy:

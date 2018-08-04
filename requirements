@@ -1,0 +1,44 @@
+requirements:
+
+Assignment
+
+Write a script to download and parse the given XML feed, manipulate some of the data, and deliver a CSV of the required fields. You may use any additional libraries that you wish, please include a requirements.txt if you do.
+CSV Requirements:
+
+    1) Contains only properties listed from 2016 [DateListed]
+    2) Contains only properties that contain the word "and" in the Description field
+    3) CSV ordered by DateListed
+    4) Required fields:
+        a) MlsId
+        b) MlsName
+        c) DateListed
+        d) StreetAddress
+        e) Price
+        f) Bedrooms
+        g) Bathrooms
+        h) Appliances (all sub-nodes comma joined)
+        i) Rooms (all sub-nodes comma joined)
+        j) Description (the first 200 characters)
+
+Technical Requirements
+
+    5) Interpreter version: python 2.7
+    6) Reasonable unit test coverage
+    7) All libraries used must be documented in requirements.txt
+        We will be using pip install -r requirements.txt prior to running your code
+    8) Raw information to parse / feed url
+        http://syndication.enterprise.websiteidx.com/feeds/BoojCodeTest.xml
+        a) This feed must be downloaded from with in the script, raw data must not be downloaded manually
+
+Submission Requirements
+
+    9) Work should be tracked with Git
+    10) Submit final product by submitting a pull request
+
+Purpose
+
+A lot of the work in our department is parsing and manipulating data from a variety of sources. The given example is one of our XML files that we send to Zillow for property syndication. Our goal in this test is to see how you will approach the processing of this feed. Your solution should take into the account that there will be other XML feeds that need parsing as well, so how modular/reusable you make the code is very important.
+
+Time Considerations
+
+This assignment is expect to take a few hours. We ask that you do not spend too much time on this solution. If you are stuck or have questions, feel free to reach out and we will answer quickly.
