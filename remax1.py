@@ -2,16 +2,29 @@
 REMAX code exercise.
 """
 
-import urllib2
+# Development environment:  Python 2.7 on OpenBSD 6.3.
 
+import unittest
+
+import urllib2
 from xml.etree import ElementTree  
 import pprint
-
-import sys
+import csv
 
 # Booj's test data URL.
 XMLURL = 'http://syndication.enterprise.websiteidx.com/feeds/BoojCodeTest.xml'
 XMLFILE = 'remax.xml'
+
+# For CSV processing types.
+STRINGX = 'string'
+LISTX = 'list'
+TRUNCATEX = 'truncate'
+
+# For doube quoting comma delimited lists.
+DOUBLEQUOTE = chr(34)
+# String constants.
+EMPTYSTRING = ''
+COMMA = ','
 
 # Required Fields.
 # Root node:
@@ -37,7 +50,16 @@ STREETADDR = 'StreetAddress'
 BASICDETAILS = 'BasicDetails'
 # Subfields.
 BEDROOMS = 'Bedrooms'
+# Bathrooms are a weirdo field - no information, just a tag,
+# followed by specific tags:
+#
+#     <FullBathrooms>4</FullBathrooms>
+#     <HalfBathrooms>1</HalfBathrooms>
+#     <ThreeQuarterBathrooms/>
 BATHROOMS = 'Bathrooms'
+FULLBATHROOMS = 'FullBathrooms'
+HALFBATHROOMS = 'HalfBathrooms'
+BATHROOM3QRTR = 'ThreeQuarterBathrooms'
 DESCRIPTION = 'Description'
 
 # Header for Appliances.
@@ -49,6 +71,83 @@ ROOMX = 'Room'
 APPLIANCES = 'Appliances'
 # Sub-sub field.
 APPLIANCEX = 'Appliance'
+
+# For dictionary.
+REQUIREDFIELDS = 'requiredfields'
+HASSUBNODES = 'hassubnodes'
+# The bathroom tag that is not a parent.
+FAUXPARENT = 'fauxparent'
+
+# Hierarchy within XML of required information.
+
+                                                    # MLSId.
+LISTINGSTRUCTURE = {LISTINGDETAILS:{REQUIREDFIELDS:[MLSID,
+                                                    # MLSName.
+                                                    MLSNAME,
+                                                    # DateListed.
+                                                    DATELISTED,
+                                                    # Price.
+                                                    PRICE],
+                                    HASSUBNODES:{},
+                                    FAUXPARENT:{}},
+                                              # StreetAddress.
+                    LOCATION:{REQUIREDFIELDS:[STREETADDR],
+                              HASSUBNODES:{},
+                              FAUXPARENT:{}},
+                                                  # Bedrooms.
+                    BASICDETAILS:{REQUIREDFIELDS:[BEDROOMS,
+                                                  # Bathrooms.
+                                                  BATHROOMS,
+                                                  # Description.
+                                                  DESCRIPTION], 
+                                  HASSUBNODES:{},
+                                  # Bathroom XML setup.
+                                  FAUXPARENT:{BATHROOMS:[FULLBATHROOMS,
+                                                         HALFBATHROOMS,
+                                                         BATHROOM3QRTR]}},
+                                                 # Rooms.
+                    RICHDETAILS:{REQUIREDFIELDS:[ROOMS,
+                                                 # Appliances.
+                                                 APPLIANCES], 
+                                              # Room subnodes.
+                                 HASSUBNODES:{ROOMS:ROOMX,
+                                              # Appliance subnodes.
+                                              APPLIANCES:APPLIANCEX},
+                                 FAUXPARENT:{}}}
+
+# For fauxparent tag Bathrooms tag.
+REALTAG = 'realtag'
+NOTRELEVANT = 'not relevant'
+
+CSVFIELDS = [MLSID,
+             MLSNAME,
+             DATELISTED,
+             STREETADDR,
+             PRICE,
+             BEDROOMS,
+             BATHROOMS,
+             APPLIANCES,
+             ROOMS,
+             DESCRIPTION]
+
+CSVPROCESSTYPE = {MLSID:STRINGX,
+                  MLSNAME:STRINGX,
+                  DATELISTED:STRINGX,
+                  STREETADDR:STRINGX,
+                  PRICE:STRINGX,
+                  BEDROOMS:STRINGX,
+                  BATHROOMS:FAUXPARENT,
+                  APPLIANCES:LISTX,
+                  ROOMS:LISTX,
+                  DESCRIPTION:TRUNCATEX} 
+
+# For filtering - not using regular expression.
+#                 "and" is usually if not always
+#                 bracketed by spaces.
+ANDX = ' and '
+
+# For truncating Description field.
+TRUNCLEN = 200
 
 # Assignment
 # 
@@ -110,7 +209,6 @@ def writexmltofile(text):
     """
     print 'Writing data from web to xml file locally . . .'
     with open(XMLFILE, 'w') as f:
-        print 'Writing xml to file . . .'
         print >> f, text
         f.close()
 
@@ -123,6 +221,7 @@ def writeoutxmlstructure(root):
     root is an ElementTree object.
     """
     # Get feel for data structure / schema in XML.
+    print 'Writing out XML structure to file . . .'
     with open('xmlstructure.txt', 'w') as f2:
         print >> f2, root.tag
         for n in xrange(len(root)):
@@ -131,9 +230,59 @@ def writeoutxmlstructure(root):
                 print >> f2, '        ' + root[n][o].tag
                 for p in xrange(len(root[n][o])):
                     print >> f2, '            ' + root[n][o][p].tag
-                    # Get appliances.
+                    # Get appliances (and rooms).
                     for q in xrange(len(root[n][o][p])):
                         print >> f2, '                ' + root[n][o][p][q].tag
+
+def checkfauxparent(tagparent, tagsub):
+    # Try to deal with bathrooms.
+    if LISTINGSTRUCTURE[tagparent][FAUXPARENT]:
+        # Get the real bathroom tags.
+        # XXX - this should work here but would need to
+        #       be worked out more rigorously if there
+        #       were name collisions.
+        realsubtags = []
+        for subtagx in LISTINGSTRUCTURE[tagparent][FAUXPARENT]:
+            # Put the real tags in a list.
+            realsubtags.extend(LISTINGSTRUCTURE[tagparent][FAUXPARENT][subtagx])
+        if tagsub in LISTINGSTRUCTURE[tagparent][FAUXPARENT]:
+            # Not a useful tag, but a header, like Bathrooms.
+            return FAUXPARENT
+        elif tagsub in realsubtags:
+            return REALTAG
+    return NOTRELEVANT
+
+def getdatafromxml(root, listingindex):
+    # Inner loop of putessentialdataintodictionary.
+    requireddata = {}
+    for o in xrange(len(root[listingindex])):
+        # LISTINGDETAILS, LOCATION, BASICDETAILS, RICHDETAILS.
+        if root[listingindex][o].tag in LISTINGSTRUCTURE:
+            tagparent = root[listingindex][o].tag
+            for p in xrange(len(root[listingindex][o])):
+                tagsub = root[listingindex][o][p].tag
+                # Check for bathrooms fauxparent here.
+                if checkfauxparent(tagparent, tagsub) == FAUXPARENT:
+                    # Do nothing and deal with the header in the
+                    # csv processing later.
+                    continue
+                elif checkfauxparent(tagparent, tagsub) == REALTAG:
+                    # Stuff the bathroom tags in as is and deal with
+                    # later in csv phase.
+                    requireddata[tagsub] = root[listingindex][o][p].text
+                if (tagsub in LISTINGSTRUCTURE[tagparent][REQUIREDFIELDS] and
+                    tagsub not in LISTINGSTRUCTURE[tagparent][FAUXPARENT]):
+                    if tagsub in LISTINGSTRUCTURE[tagparent][HASSUBNODES]:
+                        quotedtexttojoin = []
+                        for q in xrange(len(root[listingindex][o][p])):
+                            tagsubsub = root[listingindex][o][p][q].tag
+                            if tagsubsub == LISTINGSTRUCTURE[tagparent][HASSUBNODES][tagsub]:
+                                quotedtexttojoin.append(root[listingindex][o][p][q].text)
+                            requireddata[tagsub] = quotedtexttojoin
+                    else:
+                        requireddata[tagsub] = root[listingindex][o][p].text
+    key = (requireddata[DATELISTED], requireddata[MLSID])                
+    return key, requireddata
 
 def putessentialdataintodictionary(root):
     """
@@ -148,87 +297,142 @@ def putessentialdataintodictionary(root):
     listings = {}
     # Check that Listings is top node.
     if root.tag == LISTINGS:
-        for n in xrange(len(root)):
-            # Inidivdual listing.
-            requireddata = {}
-            if root[n].tag == LISTINGX:
+        for listingindex in xrange(len(root)):
+            # Individual listing.
+            if root[listingindex].tag == LISTINGX:
                 numlistings += 1
-                for o in xrange(len(root[n])):
-                    # Listing Details.
-                    if root[n][o].tag == LISTINGDETAILS:
-                        for p in xrange(len(root[n][o])):
-                            # MLSId.
-                            if root[n][o][p].tag == MLSID:
-                                requireddata[MLSID] = root[n][o][p].text
-                            # MLSName.
-                            elif root[n][o][p].tag == MLSNAME:
-                                requireddata[MLSNAME] = root[n][o][p].text
-                            # DateListed.
-                            elif root[n][o][p].tag == DATELISTED:
-                                requireddata[DATELISTED] = root[n][o][p].text
-                            # Price.
-                            elif root[n][o][p].tag == PRICE:
-                                requireddata[PRICE] = root[n][o][p].text
-                    elif root[n][o].tag == LOCATION:
-                        for p in xrange(len(root[n][o])):
-                            # StreetAddress.
-                            if root[n][o][p].tag == STREETADDR:
-                                requireddata[STREETADDR] = root[n][o][p].text
-                    elif root[n][o].tag == BASICDETAILS:
-                        for p in xrange(len(root[n][o])):
-                            # Bedrooms.
-                            if root[n][o][p].tag == BEDROOMS:
-                                requireddata[BEDROOMS] = root[n][o][p].text
-                            # Bathrooms.
-                            elif root[n][o][p].tag == BATHROOMS:
-                                requireddata[BATHROOMS] = root[n][o][p].text
-                            # Description.
-                            elif root[n][o][p].tag == DESCRIPTION:
-                                requireddata[DESCRIPTION] = root[n][o][p].text
-                    elif root[n][o].tag == RICHDETAILS:
-                        for p in xrange(len(root[n][o])):
-                            # Appliances.
-                            if root[n][o][p].tag == APPLIANCES:
-                                quotedtexttojoin = []
-                                for q in xrange(len(root[n][o][p])):
-                                    quotedtexttojoin.append(root[n][o][p][q].text)
-                                requireddata[APPLIANCES] = quotedtexttojoin
-                            # The room thing seems to always be two - 
-                            # bedrooms / bathroom.
-                            elif root[n][o][p].tag == ROOMS:
-                                quotedtexttojoin = []
-                                for q in xrange(len(root[n][o][p])):
-                                    quotedtexttojoin.append(root[n][o][p][q].text)
-                                requireddata[ROOMS] = quotedtexttojoin
-                # Get date listed and mlsid in tuple as key.
-                listings[(requireddata[DATELISTED], requireddata[MLSID])] = requireddata 
+                key, requireddata = getdatafromxml(root, listingindex)
+                listings[key] = requireddata
+    print 'Number of listings = {0:d}'.format(numlistings)
     return listings
 
-text = getdatafromweb()
-# Not essential but helpful for debugging.
-writexmltofile(text)
-# Not part of required solution, but key
-# key to getting solution set up and useful
-# for debugging.
-root = ElementTree.fromstring(text)
-writeoutxmlstructure(root)
-listings = putessentialdataintodictionary(root)
+def filterlistings(listings):
+    # listings is the dictionary of listings.
+    # Listings from 2016.
+    # key is a two tuple with the date string first.
+    filtered = {key:listings[key] for key in listings
+                if key[0][:4] == '2016' and
+                   listings[key][DESCRIPTION].find(ANDX) > -1}
+    return filtered
 
-with open('listingsdictionary.py', 'w') as f3:
-    pprint.pprint(listings, stream=f3)
+def findfauxparentfields(fauxparent):
+    # Addresses bathroom thing.
+    # Returns list.
+    # Brute force traverse.
+    for tagparent in LISTINGSTRUCTURE:
+        # XXX - if there are multiple name collisions,
+        #       this will cause problems.  OK for now.
+        if (LISTINGSTRUCTURE[tagparent][FAUXPARENT] and
+            fauxparent in LISTINGSTRUCTURE[tagparent][REQUIREDFIELDS]):
+            return LISTINGSTRUCTURE[tagparent][FAUXPARENT][fauxparent]
+    return []
 
-# General strategy:
-#
-# 1) loop through listings.
-#
-# 2) make sure all required fields are there, note indices.
-#
-# 3) filter on 
-#
-#        a) DateListed
-#
-#        b) full word "and" in Description.
-#
-#        c) sort by time interpretation of DateListed string.
+def processcsvrecord(requireddata):
+    # requireddata is a dictionary.
+    datax = []
+    for fieldx in CSVFIELDS:
+        # Everything is a string except
+        # rooms, appliances, and bathrooms.
+        # Description needs to be truncated.
+        #
+        # Put in missing data for processing.
+        if (fieldx not in requireddata and
+            CSVPROCESSTYPE[fieldx] != FAUXPARENT):
+            if CSVPROCESSTYPE[fieldx] in (STRINGX, TRUNCATEX):
+                requireddata[fieldx] = EMPTYSTRING
+            elif CSVPROCESSTYPE[fieldx] == LISTX:
+                requireddata[fieldx] = []
+        if CSVPROCESSTYPE[fieldx] == STRINGX:
+            datax.append(requireddata[fieldx])
+        elif CSVPROCESSTYPE[fieldx] == TRUNCATEX:
+            datax.append(requireddata[fieldx][:TRUNCLEN])
+        elif CSVPROCESSTYPE[fieldx] == LISTX: 
+            # Double quoted comma delimited list.
+            strx = DOUBLEQUOTE + COMMA.join(requireddata[fieldx]) + DOUBLEQUOTE
+            datax.append(strx)
+        elif CSVPROCESSTYPE[fieldx] == FAUXPARENT:
+            subfields = findfauxparentfields(fieldx)
+            # Order of subfields hard coded in LISTINGSTRUCTURE.
+            joinedlist = []
+            for subfieldx in subfields:
+                # XXX - str() will put None in for bathrooms that don't
+                #       exist - not sure if that is what is desired.
+                joinedlist.append(subfieldx + ':' + str(requireddata[subfieldx]))
+            strx = DOUBLEQUOTE + COMMA.join(joinedlist) + DOUBLEQUOTE
+            datax.append(strx)
+    return datax
 
-print 'Done'
+def writetocsv(filteredlistings):
+    # filteredlistings is a dictionary.
+    # Sort on date listed, then MLSId.
+    counter = 0
+    sortedkeys = sorted([key for key in filteredlistings])
+    with open('solution.csv', 'w') as f:
+        writerx = csv.writer(f)
+        writerx.writerow(CSVFIELDS)
+        for key in sortedkeys:
+            counter += 1
+            if counter % 10 == 0:
+                print 'Wrote {0:03d} records to csv.'.format(counter)
+            linex = processcsvrecord(filteredlistings[key])
+            writerx.writerow(linex)
+
+def workproblem():
+    # Wrapper.
+    text = getdatafromweb()
+    # Not essential but helpful for debugging.
+    writexmltofile(text)
+    # Not part of required solution, but key
+    # to getting solution set up and useful
+    # for debugging.
+    root = ElementTree.fromstring(text)
+    writeoutxmlstructure(root)
+    listings = putessentialdataintodictionary(root)
+    print 'Writing dictionary of listings to file . . .'
+    with open('listingsdictionary.py', 'w') as f3:
+        pprint.pprint(listings, stream=f3)
+    print 'Filtering listings . . .'
+    filteredlistings = filterlistings(listings)
+    print 'Writing dictionary of filtered listings to file . . .'
+    with open('listingsdictionaryfiltered.py', 'w') as f3:
+        pprint.pprint(filteredlistings, stream=f3)
+    writetocsv(filteredlistings)
+
+class TestXMLRealtorScript(unittest.TestCase):
+    def testxmlgrab(self):
+        # Does data show up from urllib2 call.
+        self.assertTrue(getdatafromweb())
+    def testcheckfauxparent(self):
+        # Test tricky part of data structure (the bathrooms).
+        self.assertEquals(checkfauxparent(BASICDETAILS, HALFBATHROOMS), REALTAG)
+        self.assertEquals(checkfauxparent(BASICDETAILS, BATHROOMS), FAUXPARENT)
+        self.assertEquals(checkfauxparent(RICHDETAILS, ROOMS), NOTRELEVANT)
+    def testlookupdictionaryintegrity(self):
+        # Make sure "constant" dictionary and list setups are as intended.
+        self.assertEquals(LISTINGSTRUCTURE[LOCATION][HASSUBNODES], {})
+        self.assertEquals(LISTINGSTRUCTURE[LOCATION][REQUIREDFIELDS][0], STREETADDR)
+        self.assertEquals(LISTINGSTRUCTURE[BASICDETAILS][REQUIREDFIELDS][1], BATHROOMS)
+        self.assertEquals(LISTINGSTRUCTURE[RICHDETAILS][REQUIREDFIELDS][1], APPLIANCES)
+        self.assertEquals(LISTINGSTRUCTURE[RICHDETAILS][HASSUBNODES][APPLIANCES], APPLIANCEX)
+        self.assertEquals(CSVFIELDS[6], BATHROOMS)
+        self.assertEquals(CSVPROCESSTYPE[DATELISTED], STRINGX)
+        self.assertEquals(CSVPROCESSTYPE[APPLIANCES], LISTX)
+        self.assertEquals(CSVPROCESSTYPE[DESCRIPTION], TRUNCATEX)
+    def testfilter(self):
+        # Test the listing filter.
+        badlistings1 = {('2016-07-04', 'xxxx'):{DESCRIPTION:'blah'}}
+        badlistings2 = {('2014-07-04', 'xxxx'):{DESCRIPTION:' and '}}
+        goodlistings = {('2016-07-04', 'xxxx'):{DESCRIPTION:' and '}}
+        self.assertEquals(filterlistings(badlistings1), {})
+        self.assertEquals(filterlistings(badlistings2), {})
+        self.assertEquals(filterlistings(goodlistings), goodlistings)
+    def testfindfauxparentfields(self):
+        self.assertEquals(findfauxparentfields(BATHROOMS), [FULLBATHROOMS,
+                                                            HALFBATHROOMS,
+                                                            BATHROOM3QRTR])
+        self.assertEquals(findfauxparentfields(STREETADDR), [])
+
+
+if __name__ == '__main__':
+    # unittest.main()
+    workproblem()
